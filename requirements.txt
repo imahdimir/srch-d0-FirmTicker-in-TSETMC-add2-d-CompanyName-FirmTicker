@@ -1,0 +1,4 @@
+pandas~=1.4.3
+githubdata~=2.6
+mirutil~=2.4
+requests~=2.28.1
