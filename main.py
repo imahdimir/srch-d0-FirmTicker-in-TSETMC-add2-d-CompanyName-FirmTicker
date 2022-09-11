@@ -1,126 +1,107 @@
-##
-
 """
 
   """
 
-##
-
+import asyncio
+import json
 
 import pandas as pd
-from pathlib import Path
-
 from githubdata import GithubData
-from mirutil import funcs as mf
-from mirutil.funcs import save_df_as_a_nice_xl as sxl
+from mirutil.df_utils import save_as_prq_wo_index as sprq
+from mirutil.tsetmc import search_tsetmc_async
+from mirutil.utils import ret_clusters_indices
 
 
-btic_repo_url = 'https://github.com/imahdimir/d-uniq-BaseTickers'
-tseid_repo_url = 'https://github.com/imahdimir/d-uniq-TSETMC_ID'
+class GDUrl :
+    with open('gdu.json' , 'r') as fi :
+        gj = json.load(fi)
 
-tic2btic_url = 'https://github.com/imahdimir/d-Ticker-2-BaseTicker-map'
+    cur = gj['cur']
+    src = gj['src']
+    trg = gj['trg']
 
-burl = f'http://www.tsetmc.com/Loader.aspx?ParTree=151311&i='
+gu = GDUrl()
 
-btic = 'BaseTicker'
-tick = 'Ticker'
-ticn = 'TickerN'
-name = 'Name'
-tid = 'TSETMC_ID'
-title = 'Title'
-mkt = 'Market'
+class ColName :
+    ftic = 'FirmTicker'
+    sk = 'srchkey'
+    tic = 'Ticker'
+    name = "Name"
+    cname = 'CompanyName'
 
-idcols = {
-    'ID-1' : '' ,
-    'ID-2' : 2 ,
-    'ID-3' : 3 ,
-    'ID-4' : 4 ,
-    }
+c = ColName()
 
 def main() :
-  pass
+    pass
 
-  ##
+    ##
 
-  btics = GithubData(btic_repo_url)
-  btics.clone()
-  ##
-  bdfpn = btics.data_filepath
-  bdf = pd.read_excel(bdfpn)
+    gds = GithubData(gu.src)
+    gds.overwriting_clone()
+    ##
+    df = gds.read_data()
+    ##
+    da = pd.DataFrame()
 
-  bdf = bdf.reset_index()
-  bdf = bdf[[btic]]
-  ##
-  sdf = pd.DataFrame()
-  ##
+    clus = ret_clusters_indices(df)
 
-  for _ , row in bdf.iterrows() :
-    _sdf = mf.search_tsetmc(row[btic])
-    sdf = pd.concat([sdf , _sdf])
+    for se in clus :
+        si , ei = se
+        print(se)
 
-  ##
-  if Path('temp.prq').exists() :
-    _df = pd.read_parquet('temp.prq')
-    sdf = pd.concat([sdf , _df])
+        nms = df.iloc[si :ei][c.ftic]
 
-  ##
-  sdf[tick] = sdf[tick].str.strip()
-  sdf[name] = sdf[name].str.strip()
-  ##
-  sdf = sdf.drop_duplicates()
-  ##
-  msk = sdf[tick].isna()
-  for cn in sdf.columns :
-    msk |= sdf[cn].isna()
+        _da = asyncio.run(search_tsetmc_async(nms))
 
-  df1 = sdf[msk]
-  ##
-  sdf = sdf.dropna()
-  sdf.to_parquet('temp.prq' , index = False)
-  ##
-  idf = pd.DataFrame()
-  for ky , vl in idcols.items() :
-    _idf = sdf[sdf.columns.difference(set(idcols.keys()) - set(ky))]
+        da = pd.concat([da , _da])
 
-    _idf[tid] = sdf[[ky]]
-    _idf[ticn] = sdf[tick] + str(vl)
+        # break
 
-    idf = pd.concat([idf , _idf])
+    ##
+    msk = da[c.tic].eq(da[c.sk])
+    db = da[msk]
+    ##
+    db = db[[c.tic , c.name]]
+    ##
+    db = db.drop_duplicates()
+    ##
+    ren = {
+            c.tic  : c.ftic ,
+            c.name : c.cname ,
+            }
+    db = db.rename(columns = ren)
+    ##
 
-  assert idf[tid].is_unique
-  ##
-  tid_repo = GithubData(tseid_repo_url)
-  tid_repo.clone()
-  ##
-  tidfpn = tid_repo.data_filepath
-  tidf = pd.read_excel(tidfpn)
-  ##
-  tidf = pd.concat([tidf , idf[[tid]]])
-  ##
-  tidf = tidf.drop_duplicates()
-  ##
-  sxl(tidf , tidfpn)
-  ##
-  msg = 'init - added by searching BaseTickers'
-  tid_repo.commit_push(msg)
+    gdt = GithubData(gu.trg)
+    gdt.overwriting_clone()
+    ##
+    dft = gdt.read_data()
+    ##
 
-  ##
-  mf.save_as_prq_wo_index(idf , 'temp1.prq')
-  ##
-  idf = pd.read_parquet('temp1.prq')
+    dft = pd.concat([dft , db])
+    ##
+    dft = dft.drop_duplicates()
+    ##
 
-  ##
-  msk = idf.duplicated(subset = [ticn , 'Market' , name , 'IsActive'] ,
-                       keep = False)
-  df1 = idf[msk]
-  ##
-  msk = idf.duplicated(subset = idf.columns.difference([tid]) , keep = False)
-  df1 = idf[msk]
-  ##
+    sprq(dft , gdt.data_fp)
+    ##
 
-  btics.rmdir()
-  tid_repo.rmdir()
+    msg = "added to data by: "
+    msg += gu.cur
+    ##
 
-  ##
+    gdt.commit_and_push(msg)
+
+    ##
+
+    gdt.rmdir()
+    gds.rmdir()
+
+
+    ##
+
+##
+if __name__ == '__main__' :
+    main()
 
 ##
